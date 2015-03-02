@@ -1,10 +1,18 @@
-FROM ximbesto/ximbase:latest
+FROM centos:centos6
 MAINTAINER Ximbesto
 
-RUN apt-get install -y tomcat7 tomcat7-admin
+# setup
+RUN yum install -y java-1.7.0-openjdk tomcat6
 
-#wget http://192.168.100.222/forgerock/openam12/OpenAM-12.0.0.war
+# download openam nightly build war
+RUN curl http://download.forgerock.org/downloads/openam/openam_link.js | grep -o "http://.*\.war" | xargs curl -o /var/lib/tomcat6/webapps/openam.war
 
-EXPOSE 8080 80 8009 22
+# setup for openam
+RUN chown -R tomcat:tomcat /usr/share/tomcat6
 
-CMD ["/sbin/my_init"]
+# setup httpd
+RUN yum install -y httpd mod_ssl
+ADD openam-proxy.conf /etc/httpd/conf.d/openam-proxy.conf
+
+# run tomcat
+CMD /etc/init.d/tomcat6 start && wait && /etc/init.d/httpd start && wait && tail -f /var/log/tomcat6/catalina.out
