@@ -5,8 +5,8 @@ ENV DEBIAN_FRONTEND noninteractive
 
 RUN apt-get install -y default-jdk tomcat7 tomcat7-admin
 
-RUN curl http://download.forgerock.org/downloads/openam/openam_link.js | grep -o "http://.*\.war" | xargs curl -o /var/lib/tomcat7/webapps/openam.war
-
+RUN mv /var/lib/tomcat7/webapps/ROOT/ /var/lib/tomcat7/webapps/ROOT1/
+RUN curl http://download.forgerock.org/downloads/openam/openam_link.js | grep -o "http://.*\.war" | xargs curl -o /var/lib/tomcat7/webapps/ROOT.war
 RUN chown -R tomcat7:tomcat7 /usr/share/tomcat7
 
 # setup httpd
