@@ -10,7 +10,7 @@ RUN curl http://download.forgerock.org/downloads/openam/openam_link.js | grep -o
 RUN chown -R tomcat7:tomcat7 /usr/share/tomcat7
 
 # setup httpd
-RUN yum install -y apache2
+RUN apt-get install -y apache2
 RUN a2enmod ssl
 ADD openam-proxy.conf /etc/httpd/conf.d/openam-proxy.conf
 
