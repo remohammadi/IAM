@@ -8,6 +8,7 @@ RUN apt-get install -y default-jdk tomcat7 tomcat7-admin
 RUN mv /var/lib/tomcat7/webapps/ROOT/ /var/lib/tomcat7/webapps/ROOT1/
 RUN curl http://download.forgerock.org/downloads/openam/openam_link.js | grep -o "http://.*\.war" | xargs curl -o /var/lib/tomcat7/webapps/ROOT.war
 RUN chown -R tomcat7:tomcat7 /usr/share/tomcat7
+RUN mkdir /usr/share/tomcat7/config
 RUN chown -R tomcat7:tomcat7 /usr/share/tomcat7/config
 
 # setup httpd
