@@ -15,7 +15,7 @@ ADD openam-proxy.conf /etc/httpd/conf.d/openam-proxy.conf
 
 EXPOSE 22 80 443 8080 8009
 
-RUN mkdir /usr/share/tomcat7/config
+#RUN mkdir /usr/share/tomcat7/config
 
 # run tomcat
 #CMD ["/sbin/my_init"]
