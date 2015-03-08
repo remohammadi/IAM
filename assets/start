@@ -3,6 +3,7 @@ set -e
 
 appStart () {
   echo "Starting OpenAM..."
+  chown -R tomcat7:tomcat7 /usr/share/tomcat7/
   chown -R tomcat7:tomcat7 /usr/share/tomcat7/config
   chown -R tomcat7:tomcat7 /usr/share/tomcat7/opt/
   /etc/init.d/tomcat7 start && wait && /etc/init.d/apache2 start && wait && tail -f /var/log/tomcat7/catalina.out
