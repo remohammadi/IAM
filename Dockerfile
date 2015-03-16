@@ -1,30 +1,31 @@
-FROM ximbesto/ximbase:latest
-MAINTAINER Ximbesto
+FROM tomcat:8.0-jre7
+MAINTAINER Reza Mohammadi <reza@cafebazaar.ir>
 
-ENV DEBIAN_FRONTEND noninteractive
+RUN \
+    apt-key adv --keyserver pgp.mit.edu --recv-keys 573BFD6B3D8FBC641079A6ABABF5BD827BD9BF62 && \
+    echo "deb http://nginx.org/packages/mainline/debian/ wheezy nginx" >> /etc/apt/sources.list
 
-RUN apt-get install -y default-jdk tomcat7 tomcat7-admin
+RUN \
+    apt-get update -q && \
+    apt-get upgrade -qy && \
+    apt-get install -qy curl unzip nginx supervisor && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
 
-RUN mv /var/lib/tomcat7/webapps/ROOT/ /var/lib/tomcat7/webapps/ROOT1/
-RUN curl http://download.forgerock.org/downloads/openam/openam_link.js | grep -o "http://.*\.war" | xargs curl -o /var/lib/tomcat7/webapps/openam.war
+RUN \
+    rm -r $CATALINA_HOME/webapps/* && \
+    curl http://download.forgerock.org/downloads/openam/openam_link.js | grep -o "http://.*\.war" | xargs curl -o $CATALINA_HOME/webapps/openam.war
 
-# setup httpd
-RUN apt-get install -y apache2
-RUN a2enmod ssl
-ADD openam-proxy.conf /etc/httpd/conf.d/openam-proxy.conf
+CMD /usr/bin/IAM-initializer
+EXPOSE 80 443 389 636
+VOLUME ["/var/logs/IAM", "/var/IAM/", "/opt/opendj/locks"]
 
-EXPOSE 22 80 443 8080 8009
+ADD assets/OpenDJ-2.6.0.zip                 /tmp/OpenDJ-2.6.0.zip
+RUN \
+    unzip /tmp/OpenDJ-2.6.0.zip -d /opt/ && \
+    rm /tmp/OpenDJ-2.6.0.zip
 
-#RUN mkdir /usr/share/tomcat7/config
-
-# run tomcat
-#CMD ["/sbin/my_init"]
-#RUN chown -R tomcat7:tomcat7 /usr/share/tomcat7/config
-#USER tomcat7
-#VOLUME /usr/share/tomcat7/config
-
-ADD assets/start /app/start
-RUN chmod 755 /app/start
-
-ENTRYPOINT ["/app/start"]
-CMD /etc/init.d/tomcat7 start && wait && /etc/init.d/apache2 start && wait && tail -f /var/log/tomcat7/catalina.out
+ADD assets/supervisord.conf                 /etc/supervisor/supervisord.conf
+ADD assets/opendj_through_supervisord.sh    /usr/bin/opendj_through_supervisord.sh
+ADD assets/nginx.conf                       /etc/nginx/nginx.conf
+ADD assets/cts-add-schema.ldif              /tmp/cts-add-schema.ldif
+ADD assets/IAM-initializer                  /usr/bin/IAM-initializer

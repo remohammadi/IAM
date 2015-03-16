@@ -1,0 +1,144 @@
+#!/bin/bash
+
+set -e
+
+usage() { 
+    echo "$@" 1>&2;
+    echo
+    echo "Files: "
+    echo " * /etc/IAM/key.pem & /etc/IAM/cert.pem"
+    echo "   An SSL key+certificate pair valid for your domain."
+    echo
+    exit 2
+}
+
+[ -f "/etc/IAM/key.pem" ] || usage "/etc/IAM/key.pem not found."
+[ -f "/etc/IAM/cert.pem" ] || usage "/etc/IAM/cert.pem not found."
+[ "$BASE_DN" ] || usage "BASE_DN not set."
+[ "$DC" ] || usage "DC not set."
+[ "$ROOT_PASSWORD" ] || usage "ROOT_PASSWORD not set."
+
+echo "Preparing Logs Directory Structure..."
+mkdir -p /var/logs/IAM/supervisord
+mkdir -p /var/logs/IAM/nginx    && chown www-data:www-data /var/logs/IAM/nginx
+mkdir -p /var/logs/IAM/tomcat8
+rm -rf $CATALINA_HOME/logs
+ln -s /var/logs/IAM/tomcat8 $CATALINA_HOME/logs
+mkdir -p /var/logs/IAM/opendj
+rm -rf /opt/opendj/logs
+ln -s /var/logs/IAM/opendj /opt/opendj/logs
+
+echo "Preparing Runtime Directory Structure..."
+mkdir -p /var/IAM/opendj_db
+rm -rf /opt/opendj/db
+ln -s /var/IAM/opendj_db /opt/opendj/db
+
+echo "Preparing SSL Certificate..."
+# Thanks to http://stackoverflow.com/questions/906402/
+openssl pkcs12 -export -passout pass:fujava -in /etc/IAM/cert.pem -inkey /etc/IAM/key.pem -out /tmp/key-cert.p12 -name x509keycert
+keytool -importkeystore -trustcacerts -destkeystore /tmp/key-cert.ks  -deststorepass fujava -srckeystore /tmp/key-cert.p12 -srcstoretype PKCS12 -srcstorepass fujava -alias x509keycert
+
+if [ ! -f /opt/opendj/config/buildinfo ]; then
+echo "Initializing opendj..."
+# http://openam.forgerock.org/doc/install-guide/index/chap-prepare-install.html#prepare-configuration-store
+cd /opt/opendj/
+
+echo -n "[1]"
+./setup --cli --acceptLicense --no-prompt --useJavaKeystore /tmp/key-cert.ks \
+    --keyStorePassword fujava --skipPortCheck --enableStartTLS \
+    --rootUserPassword "$ROOT_PASSWORD"
+
+echo -n "[3]"
+bin/dsconfig --no-prompt create-backend --backend-name cfgStore \
+    --set base-dn:"$BASE_DN" --set enabled:true --type local-db --port 4444 \
+    --bindDN "cn=Directory Manager" --bindPassword "$ROOT_PASSWORD"
+
+echo -n "[4]"
+cat > /tmp/add-config-entries.ldif <<EOL
+dn: $BASE_DN
+objectclass: top
+objectclass: domain
+dc: $DC
+aci: (targetattr="*")(version 3.0;acl "Allow entry search"; allow (search, read)(userdn = "ldap:///uid=openam,ou=admins,$BASE_DN");)
+aci: (targetattr="*")(version 3.0;acl "Modify config entry"; allow (write)(userdn = "ldap:///uid=openam,ou=admins,$BASE_DN");)
+aci: (targetcontrol="2.16.840.1.113730.3.4.3")(version 3.0;acl "Allow persistent search"; allow (search, read)(userdn = "ldap:///uid=openam,ou=admins,$BASE_DN");)
+aci: (version 3.0;acl "Add config entry"; allow (add)(userdn = "ldap:///uid=openam,ou=admins,$BASE_DN");)
+aci: (version 3.0;acl "Delete config entry"; allow (delete)(userdn = "ldap:///uid=openam,ou=admins,$BASE_DN");)
+
+dn: ou=admins,$BASE_DN
+objectclass: top
+objectclass: organizationalUnit
+ou: admins
+
+dn: uid=openam,ou=admins,$BASE_DN
+objectclass: top
+objectclass: person
+objectclass: organizationalPerson
+objectclass: inetOrgPerson
+cn: openam
+sn: openam
+uid: openam
+userPassword: $ROOT_PASSWORD
+ds-privilege-name: subentry-write
+ds-privilege-name: update-schema
+EOL
+
+echo -n "[5]"
+bin/ldapmodify --bindDN "cn=Directory Manager" \
+    --bindPassword "$ROOT_PASSWORD" --defaultAdd --useStartTLS \
+    --trustAll --filename /tmp/add-config-entries.ldif  || echo "Already done!"
+
+echo -n "[6]"
+GLOBAL_ACI="(target = \"ldap:///cn=schema\")(targetattr = \"attributeTypes || objectClasses\")(version 3.0; acl \"Modify schema\"; allow (write)(userdn = \"ldap:///uid=openam,ou=admins,$BASE_DN\");)"
+bin/dsconfig set-access-control-handler-prop --no-prompt --port 4444 \
+    --add global-aci:"$GLOBAL_ACI" \
+    --bindDN "cn=Directory Manager" --bindPassword "$ROOT_PASSWORD" --trustAll
+
+echo -n "[9]"
+bin/ldapmodify --bindDN "cn=Directory Manager" \
+    --bindPassword "$ROOT_PASSWORD" --useStartTLS --trustAll \
+    --fileName /tmp/cts-add-schema.ldif
+
+# echo -n "[10]"
+# bin/dsconfig create-local-db-index --no-prompt --port 4444 \
+#     --hostname 127.0.0.1 --bindDN "cn=Directory Manager" \
+#     --bindPassword "$ROOT_PASSWORD" --backend-name cfgStore \
+#     --index-name iplanet-am-user-federation-info-key \
+#     --set index-type:equality --trustAll
+# bin/dsconfig create-local-db-index --no-prompt --port 4444 \
+#     --hostname 127.0.0.1 --bindDN "cn=Directory Manager" \
+#     --bindPassword "$ROOT_PASSWORD" --backend-name cfgStore \
+#     --index-name sun-fm-saml2-nameid-infokey \
+#     --set index-type:equality --trustAll
+# bin/dsconfig create-local-db-index --no-prompt --port 4444 \
+#     --hostname 127.0.0.1 --bindDN "cn=Directory Manager" \
+#     --bindPassword "$ROOT_PASSWORD" --backend-name cfgStore \
+#     --index-name sunxmlkeyvalue \
+#     --set index-type:equality --trustAll
+# bin/dsconfig create-local-db-index --no-prompt --port 4444 \
+#     --hostname 127.0.0.1 --bindDN "cn=Directory Manager" \
+#     --bindPassword "$ROOT_PASSWORD" --backend-name cfgStore \
+#     --index-name sunxmlkeyvalue \
+#     --set index-type:substring --trustAll
+
+echo -n "[11]"
+bin/rebuild-index --port 4444 --hostname 127.0.0.1 --trustAll \
+    --bindDN "cn=Directory Manager" --bindPassword "$ROOT_PASSWORD" \
+    --baseDN "$BASE_DN" --rebuildAll --start 0
+
+echo -n "[12]"
+bin/verify-index --baseDN "$BASE_DN"
+
+echo
+/opt/opendj/bin/stop-ds
+echo "opendj initialized."
+fi
+
+echo "Initializing openam..."
+mkdir -p ~/.openamcfg
+echo -n "/var/IAM/openam" > ~/.openamcfg/AMConfig_usr_local_tomcat_webapps_openam_
+echo "openam initialized."
+
+rm /tmp/key-cert.*
+
+/usr/bin/supervisord -c /etc/supervisor/supervisord.conf
